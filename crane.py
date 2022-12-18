@@ -18,7 +18,8 @@ l_motor = Motor('C')
 r_motor = Motor('D')
 #color Sensors
 dropoff_sensor = ColorSensor('F')
-item_sensor = ColorSensor('A')
+back_sensor = ColorSensor('A')
+
 # Initialize the Distance Sensor
 object_detector = DistanceSensor('B')
 
@@ -38,13 +39,17 @@ search_duration = None
 
 correct_bounds_begin_time = None
 
-has_object = False
+has_object = True
+backing_up = False
 
-def getRandomSteering():
-    return random.randint(-100, 100)
+def getRandomSteering(min=-100, max=100):
+    return random.randint(min, max)
 
 def getRandomDuration():
     return random.randint(2, 6)
+
+def getRandomDegrees():
+    return random.randint(10, 350)
 
 def craneDown():
     crane_motor.run_to_degrees_counted(-50, 10)
@@ -99,24 +104,24 @@ def wander():
     if timer.now() - wander_begin_time >= wander_duration:
         setupWander()
 
-    light = dropoff_sensor.get_reflected_light()
-    on_black = light < mid_light
-
-    if on_black:
+    if hitBounds():
         motor_pair.stop()
         next_state = 'correcting_bounds'
+        return
     
-    #Note: This part throws errors when an object gets in grabbing range and overshoots.
+     #Note: This part throws errors when an object gets in grabbing range and overshoots.
     #      Unsupported types 'Nonetype' and 'int'.
-    #Item detected within range
-    if (object_detector.get_distance_cm() != None and less_than(object_detector.get_distance_cm(), 50)): 
-        motor_pair.start(steering=0, speed=-15)
     #Item detected within grabbing range
-    elif (object_detector.get_distance_cm() != None and less_than(2, object_detector.get_distance_cm()) and less_than(object_detector.get_distance_cm(), 10)):
+    distance = object_detector.get_distance_cm()
+    if (distance != None and less_than(2, distance) and less_than(distance, 10)):
         motor_pair.stop()
         next_state = 'picking_up'
         hub.status_light.on('green')
-    elif(object_detector.get_distance_cm() == None):
+    #Item detected within range
+    elif (distance != None and less_than(distance, 30)):
+        hub.status_light.on('pink') 
+        motor_pair.start(steering=0, speed=-10)
+    else:
         hub.status_light.on('azure')
 
 def setupSearch():
@@ -131,15 +136,12 @@ def search():
     global next_state
     if timer.now() - search_begin_time >= search_duration:
         setupSearch()
-
-    light = dropoff_sensor.get_reflected_light()
-    on_black = light < mid_light
-
-    if on_black:
+    
+    if hitBounds():
         motor_pair.stop()
         next_state = 'correcting_bounds'
-        return 
-    
+        return
+
     color = dropoff_sensor.get_color()
     
     #If a dropoff point is located, begin dropoff process
@@ -147,23 +149,53 @@ def search():
         motor_pair.stop()
         next_state = 'dropping_off'
         hub.status_light.on(color)
+    
+def hitBounds():
+    sensor = dropoff_sensor
+    if backing_up:
+        sensor = back_sensor
+    light = sensor.get_reflected_light()
+    on_black = light < mid_light
+
+    if on_black:
+        return True
+    return False 
 
 
 def setupCorrectBounds():
-    global correct_bounds_begin_time
+    global correct_bounds_begin_time, backing_up
     hub.status_light.on('red')
     correct_bounds_begin_time = timer.now()
-    motor_pair.start(steering=100, speed=30)
+
+    if backing_up:
+        #motor_pair.move(steering=getRandomSteering(min=-20, max=20), speed=30)
+        motor_pair.start(steering=getRandomSteering(min=-20, max=20), speed=30)
+    else:
+        motor_pair.start(steering=getRandomSteering(min=-20, max=20), speed=-30)
+    backing_up = not backing_up
 
 def correctBounds():
-    global next_state
+    global next_state, backing_up
+
+    sensor = dropoff_sensor
+    if backing_up:
+        sensor = back_sensor
+    
+    light = sensor.get_reflected_light()
+    on_black = light < mid_light
+    if on_black:
+        motor_pair.stop()
+        setupCorrectBounds()
 
     if timer.now() - correct_bounds_begin_time >= 1.4:
         motor_pair.stop()
+        backing_up = not backing_up
         if has_object:
             next_state = 'searching'
         else:
             next_state = 'wandering'
+            
+        motor_pair.move(getRandomDegrees(), 'degrees', steering=100, speed=15)
 
 def dropOff():
     global next_state
@@ -195,12 +227,7 @@ def pickUp():
 def mainLoop(duration):
     global timer, last_state, state, next_state
     timer = Timer()
-    if has_object:
-        next_state = 'searching'
-        craneUp()
-    else:
-        next_state = 'wandering'
-
+    
     while(timer.now() < duration):
         if state == 'wandering':
             if last_state != 'wandering':
@@ -226,4 +253,11 @@ def mainLoop(duration):
 
 calibrateDropoffSensor()
 liftCalibration()
+
+if has_object:
+    next_state = 'searching'
+    craneUp()
+else:
+    next_state = 'wandering'
+
 mainLoop(200)
