@@ -1,9 +1,5 @@
 #Crane stretch part
 #Kiefer, Lillian, Allen
-'''Notes:
-   - Item detection throws unsupported types 'Nonetype' and 'int' errors at line 108
-   - The ground reflective sensor does not like moving backwards. It will frequently
-     overshoot the boundary line and get stuck outside of the boundary.'''
 from spike import PrimeHub, Motor, MotorPair, ColorSensor, DistanceSensor, LightMatrix
 from spike.control import Timer, wait_for_seconds
 from spike.operator import greater_than, less_than
@@ -19,7 +15,6 @@ r_motor = Motor('D')
 #color Sensors
 dropoff_sensor = ColorSensor('F')
 back_sensor = ColorSensor('A')
-
 # Initialize the Distance Sensor
 object_detector = DistanceSensor('B')
 
@@ -39,7 +34,7 @@ search_duration = None
 
 correct_bounds_begin_time = None
 
-has_object = True
+has_object = False
 backing_up = False
 
 def getRandomSteering(min=-100, max=100):
@@ -52,10 +47,10 @@ def getRandomDegrees():
     return random.randint(10, 350)
 
 def craneDown():
-    crane_motor.run_to_degrees_counted(-50, 10)
+    crane_motor.run_to_degrees_counted(-100, 10)
     
 def craneUp():
-    crane_motor.run_to_degrees_counted(50, 10)
+    crane_motor.run_to_degrees_counted(100, 10)
 
 #Calibrate lift to the right height to pickup/dropoff blocks
 def liftCalibration():
@@ -109,7 +104,7 @@ def wander():
         next_state = 'correcting_bounds'
         return
     
-     #Note: This part throws errors when an object gets in grabbing range and overshoots.
+    #Note: This part throws errors when an object gets in grabbing range and overshoots.
     #      Unsupported types 'Nonetype' and 'int'.
     #Item detected within grabbing range
     distance = object_detector.get_distance_cm()
@@ -136,12 +131,12 @@ def search():
     global next_state
     if timer.now() - search_begin_time >= search_duration:
         setupSearch()
-    
+
     if hitBounds():
         motor_pair.stop()
         next_state = 'correcting_bounds'
-        return
-
+        return 
+    
     color = dropoff_sensor.get_color()
     
     #If a dropoff point is located, begin dropoff process
@@ -149,7 +144,7 @@ def search():
         motor_pair.stop()
         next_state = 'dropping_off'
         hub.status_light.on(color)
-    
+
 def hitBounds():
     sensor = dropoff_sensor
     if backing_up:
@@ -166,9 +161,7 @@ def setupCorrectBounds():
     global correct_bounds_begin_time, backing_up
     hub.status_light.on('red')
     correct_bounds_begin_time = timer.now()
-
     if backing_up:
-        #motor_pair.move(steering=getRandomSteering(min=-20, max=20), speed=30)
         motor_pair.start(steering=getRandomSteering(min=-20, max=20), speed=30)
     else:
         motor_pair.start(steering=getRandomSteering(min=-20, max=20), speed=-30)
@@ -194,19 +187,17 @@ def correctBounds():
             next_state = 'searching'
         else:
             next_state = 'wandering'
-            
-        motor_pair.move(getRandomDegrees(), 'degrees', steering=100, speed=15)
 
 def dropOff():
     global next_state
 
-    craneDown()
-    wait_for_seconds(0.5)
     craneUp()
     wait_for_seconds(0.5)
     craneDown()
     wait_for_seconds(0.5)
     craneUp()
+    wait_for_seconds(0.5)
+    craneDown()
 
     motor_pair.move(3, 'in', steering=20, speed=-30)
 
@@ -215,11 +206,14 @@ def dropOff():
     hub.status_light.on('white')
 
 def pickUp():
+    global next_state
+    
+    print("In pick-up")
     hub.status_light.on('green')
-    motor_pair.move(180, unit='degrees', steering=100, speed=15)
-    motor_pair.move(2, 'in', steering=0, speed=15)
+    motor_pair.move(360, unit='degrees', steering=100, speed=15)
+    motor_pair.move(5, 'in', steering=0, speed=15)
     craneDown()
-    next_state = "searching"
+    next_state = 'searching'
     has_object = True
     hub.status_light.on('white')
         
@@ -227,7 +221,7 @@ def pickUp():
 def mainLoop(duration):
     global timer, last_state, state, next_state
     timer = Timer()
-    
+
     while(timer.now() < duration):
         if state == 'wandering':
             if last_state != 'wandering':
@@ -249,15 +243,17 @@ def mainLoop(duration):
         last_state = state
         state = next_state
 
+        print(last_state, ", ", state, ", ", next_state)
+
         #State can be wandering(has no block), searching(for dropoff), dropping off, picking up, bounds correction
 
 calibrateDropoffSensor()
 liftCalibration()
-
 if has_object:
     next_state = 'searching'
-    craneUp()
+    craneDown()
 else:
     next_state = 'wandering'
+    craneUp()
 
 mainLoop(200)
