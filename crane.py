@@ -35,7 +35,7 @@ search_duration = None
 correct_bounds_begin_time = None
 
 has_object = False
-backing_up = False
+backing_up = True
 
 def getRandomSteering(min=-100, max=100):
     return random.randint(min, max)
@@ -44,13 +44,13 @@ def getRandomDuration():
     return random.randint(2, 6)
 
 def getRandomDegrees():
-    return random.randint(10, 350)
+    return random.randint(10, 700)
 
 def craneDown():
-    crane_motor.run_to_degrees_counted(-100, 10)
+    crane_motor.run_to_degrees_counted(0, 10)
     
 def craneUp():
-    crane_motor.run_to_degrees_counted(100, 10)
+    crane_motor.run_to_degrees_counted(80, 10)
 
 #Calibrate lift to the right height to pickup/dropoff blocks
 def liftCalibration():
@@ -95,15 +95,10 @@ def setupWander():
     wander_begin_time = timer.now()
 
 def wander():
-    global next_state
+    global next_state, backing_up
     if timer.now() - wander_begin_time >= wander_duration:
         setupWander()
 
-    if hitBounds():
-        motor_pair.stop()
-        next_state = 'correcting_bounds'
-        return
-    
     #Note: This part throws errors when an object gets in grabbing range and overshoots.
     #      Unsupported types 'Nonetype' and 'int'.
     #Item detected within grabbing range
@@ -112,12 +107,18 @@ def wander():
         motor_pair.stop()
         next_state = 'picking_up'
         hub.status_light.on('green')
+        backing_up = False
     #Item detected within range
     elif (distance != None and less_than(distance, 30)):
         hub.status_light.on('pink') 
         motor_pair.start(steering=0, speed=-10)
     else:
         hub.status_light.on('azure')
+    
+    if hitBounds():
+        motor_pair.stop()
+        next_state = 'correcting_bounds'
+        return
 
 def setupSearch():
     global search_duration, search_begin_time
@@ -131,11 +132,6 @@ def search():
     global next_state
     if timer.now() - search_begin_time >= search_duration:
         setupSearch()
-
-    if hitBounds():
-        motor_pair.stop()
-        next_state = 'correcting_bounds'
-        return 
     
     color = dropoff_sensor.get_color()
     
@@ -144,11 +140,23 @@ def search():
         motor_pair.stop()
         next_state = 'dropping_off'
         hub.status_light.on(color)
+    
+    if hitBounds():
+        motor_pair.stop()
+        next_state = 'correcting_bounds'
+        return 
 
 def hitBounds():
     sensor = dropoff_sensor
     if backing_up:
         sensor = back_sensor
+
+    color = sensor.get_color()
+    
+    #If a dropoff point is located, begin dropoff process
+    if color == 'red' or color == 'blue' or color == 'yellow':
+        return False
+        
     light = sensor.get_reflected_light()
     on_black = light < mid_light
 
@@ -188,16 +196,22 @@ def correctBounds():
         else:
             next_state = 'wandering'
 
+        sign = random.randint(0, 1)
+        if sign == 0:
+            motor_pair.move(getRandomDegrees(), unit='degrees', steering=-100, speed=15)
+        else:
+            motor_pair.move(getRandomDegrees(), unit='degrees', steering=100, speed=15)
+
 def dropOff():
     global next_state
 
     craneUp()
-    wait_for_seconds(0.5)
-    craneDown()
-    wait_for_seconds(0.5)
-    craneUp()
-    wait_for_seconds(0.5)
-    craneDown()
+    #wait_for_seconds(0.5)
+    #craneDown()
+    #wait_for_seconds(0.5)
+    #craneUp()
+    #wait_for_seconds(0.5)
+    #craneDown()
 
     motor_pair.move(3, 'in', steering=20, speed=-30)
 
@@ -206,7 +220,7 @@ def dropOff():
     hub.status_light.on('white')
 
 def pickUp():
-    global next_state
+    global next_state, backing_up, has_object
     
     print("In pick-up")
     hub.status_light.on('green')
@@ -216,6 +230,7 @@ def pickUp():
     next_state = 'searching'
     has_object = True
     hub.status_light.on('white')
+    backing_up = False
         
 
 def mainLoop(duration):
